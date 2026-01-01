@@ -3,7 +3,7 @@ import concurrent.futures
 import time
 import sys
 import argparse
-
+from tqdm import tqdm
 
 DNS_TIMEOUT = 2
 CONNECT_TIMEOUT = 2
@@ -17,46 +17,56 @@ def resolve_host(host, timeout=DNS_TIMEOUT):
             raise socket.gaierror("no addresses returned")
         return infos[0]  # (family, socktype, proto, canonname, sockaddr)
 
-
 def port_scan(addrinfo, port):
     try:
         family, socktype, proto, _, sockaddr = addrinfo
-
         with socket.socket(family, socktype, proto) as s:
             s.settimeout(CONNECT_TIMEOUT)
-
             # Replace the port inside sockaddr (IPv4 is 2-tuple, IPv6 is 4-tuple)
             if family == socket.AF_INET:
                 target = (sockaddr[0], port)
             else:
                 target = (sockaddr[0], port, sockaddr[2], sockaddr[3])
-
             s.connect(target)
             return True
-
     except (OSError, ConnectionRefusedError, socket.gaierror, socket.timeout):
         return False
 
 def threaded_scanner(addr, ports):
-   with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+    open_ports = []
+    ports_list = list(ports)  # Convert to list for length calculation
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures_to_port = {
             executor.submit(port_scan, addr, port): port
-            for port in ports 
+            for port in ports_list
         }
-
-        for future in concurrent.futures.as_completed(futures_to_port):
-            port = futures_to_port[future]
-            try:
-                if future.result():
-                    print(f"{port} Port is Open")                                                                                                                                                                                                       
-            except Exception:                                                                                                                                                                                                                           
-                pass   
+        
+        # Progress bar with light blue color
+        with tqdm(
+            total=len(ports_list),
+            desc="Scanning",
+            unit="port",
+            colour="#00BFFF",  # Light blue (Deep Sky Blue)
+            bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
+        ) as pbar:
+            for future in concurrent.futures.as_completed(futures_to_port):
+                port = futures_to_port[future]
+                try:
+                    if future.result():
+                        open_ports.append(port)
+                except Exception:
+                    pass
+                pbar.update(1)
+    
+    return sorted(open_ports)
 
 def main():
+    # Disclaimer: Please only scan ports you have explicit permission to scan.
+
     parser = argparse.ArgumentParser(description="Usage: Scan PortStart to PortEnd on Host")
-
+    
     parser.add_argument("-t","--top",action="store_true", help="scans top 100 ports")
-
     parser.add_argument("host", type=str, help="The Host you wish to scan")
     parser.add_argument("ps", nargs="?", type=int, help="port to start the scan from before incrementing to the next port")
     parser.add_argument("pe", nargs="?", type=int, help="port to end the scan at")
@@ -79,9 +89,8 @@ def main():
     9201,9418,9999,10000,27018,27019
     ]
 
-
     start_time = time.time()
-
+    
     try:
         addr = resolve_host(args.host)
     except concurrent.futures.TimeoutError:
@@ -92,10 +101,22 @@ def main():
         return
 
     ports = top_100_ports if args.top else range(args.ps, args.pe + 1)
-    threaded_scanner(addr, ports)
-
+    
+    print(f"\nScanning {args.host}...")
+    print("-" * 40)
+    
+    open_ports = threaded_scanner(addr, ports)
+    
+    print("-" * 40)
+    if open_ports:
+        print(f"\nOpen ports found: {len(open_ports)}")
+        for port in open_ports:
+            print(f"  {port}/tcp  open")
+    else:
+        print("\nNo open ports found.")
+    
     end_time=time.time()
-    print(f"Checked All Ports in {end_time - start_time:.2f} seconds")
+    print(f"\nCompleted in {end_time - start_time:.2f} seconds")
 
 if __name__ == "__main__":
     main()
