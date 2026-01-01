@@ -37,17 +37,48 @@ def port_scan(addrinfo, port):
     except (OSError, ConnectionRefusedError, socket.gaierror, socket.timeout):
         return False
 
+def threaded_scanner(addr, ports):
+   with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures_to_port = {
+            executor.submit(port_scan, addr, port): port
+            for port in ports 
+        }
+
+        for future in concurrent.futures.as_completed(futures_to_port):
+            port = futures_to_port[future]
+            try:
+                if future.result():
+                    print(f"{port} Port is Open")                                                                                                                                                                                                       
+            except Exception:                                                                                                                                                                                                                           
+                pass   
 
 def main():
     parser = argparse.ArgumentParser(description="Usage: Scan PortStart to PortEnd on Host")
 
-    parser.add_argument("host", type=str, help="The Host you wish to scan")
-    parser.add_argument("ps", type=int, help="port to start the scan from before incrementing to the next port")
-    parser.add_argument("pe", type=int, help="port to end the scan at")
+    parser.add_argument("-t","--top",action="store_true", help="scans top 100 ports")
 
+    parser.add_argument("host", type=str, help="The Host you wish to scan")
+    parser.add_argument("ps", nargs="?", type=int, help="port to start the scan from before incrementing to the next port")
+    parser.add_argument("pe", nargs="?", type=int, help="port to end the scan at")
+    
     args = parser.parse_args()
 
     futures_to_port={} # Used for tracking the port-to-future (thread) so we can see it on the other "end" of the concurrency.
+    
+    top_100_ports = [
+    21,22,23,25,53,80,110,111,135,139,
+    143,443,445,993,995,1723,3306,3389,
+    5900,8080,8443,1433,1521,5432,6379,
+    27017,9200,5601,11211,2049,5060,
+    5901,8000,8008,8888,9000,9090,
+    7001,7002,9443,6667,389,636,
+    500,4500,20,69,123,161,162,179,389,427,4433,5000,
+    5001,5061,5433,5600,6000,6001,6666,7000,
+    7007,7100,7777,8001,8002,8009,8081,8088,
+    8181,8880,8888,9001,9002,9042,9080,9091,
+    9201,9418,9999,10000,27018,27019
+    ]
+
 
     start_time = time.time()
 
@@ -60,19 +91,8 @@ def main():
         print("host does not resolve")
         return
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures_to_port = {
-            executor.submit(port_scan, addr, port): port
-            for port in range(args.ps, args.pe + 1)
-        }
-
-        for future in concurrent.futures.as_completed(futures_to_port):
-            port = futures_to_port[future]
-            try:
-                if future.result():
-                    print(f"{port} Port is Open")
-            except Exception:
-                pass
+    ports = top_100_ports if args.top else range(args.ps, args.pe + 1)
+    threaded_scanner(addr, ports)
 
     end_time=time.time()
     print(f"Checked All Ports in {end_time - start_time:.2f} seconds")
